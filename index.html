@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tong Store</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #f6f7fb; color: #111827; }
+    header { background: #111827; color: white; padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    header h1 { margin: 0; font-size: 22px; }
+    .pin-box { display: flex; gap: 8px; align-items: center; }
+    input, textarea, button { font: inherit; border-radius: 10px; border: 1px solid #d1d5db; padding: 10px 12px; }
+    button { cursor: pointer; background: #2563eb; color: white; border: none; font-weight: 600; }
+    button:hover { background: #1d4ed8; }
+    .container { max-width: 1050px; margin: 0 auto; padding: 20px; }
+    .card { background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.04); }
+    .hidden { display: none; }
+    form { display: grid; gap: 10px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 700px) { .row { grid-template-columns: 1fr; } }
+    .products { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .product { background: white; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; }
+    .product img, .placeholder { width: 100%; height: 160px; object-fit: cover; background: #e5e7eb; display: grid; place-items: center; color: #6b7280; font-size: 14px; }
+    .product-body { padding: 12px; display: grid; gap: 6px; }
+    .product-name { font-weight: 700; }
+    .price { color: #047857; font-weight: 800; }
+    .desc { color: #4b5563; font-size: 14px; }
+    .muted { color: #6b7280; font-size: 13px; }
+    .status { margin: 8px 0; font-size: 14px; }
+    .error { color: #b91c1c; }
+    .success { color: #047857; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Tong Store</h1>
+    <div class="pin-box">
+      <input id="pinInput" type="password" placeholder="Admin PIN" />
+      <button id="unlockBtn" type="button">Unlock</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="status" class="status"></div>
+
+    <section id="addSection" class="card hidden">
+      <h2>Add Product</h2>
+      <form id="productForm">
+        <input id="name" placeholder="Product name" required />
+        <div class="row">
+          <input id="price" type="number" step="0.01" min="0" placeholder="Price" required />
+          <input id="image_url" placeholder="Image URL (optional)" />
+        </div>
+        <textarea id="description" placeholder="Description (optional)" rows="3"></textarea>
+        <button type="submit">Add Product</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Recent Products</h2>
+      <div id="products" class="products"></div>
+    </section>
+  </main>
+
+  <script>
+    // ============================================================
+    // PALITAN ITO NG TOTOONG VALUES MO MULA SA SUPABASE
+    // ============================================================
+    const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+    const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";
+    const ADMIN_PIN = "1234"; // palitan mo ng sarili mong PIN
+    // ============================================================
+
+    const TABLE = "products";
+    const headers = {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json"
+    };
+
+    const statusEl = document.getElementById("status");
+    const productsEl = document.getElementById("products");
+    const addSection = document.getElementById("addSection");
+    const form = document.getElementById("productForm");
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (m) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+      }[m]));
+    }
+
+    function setStatus(msg, type = "") {
+      statusEl.textContent = msg;
+      statusEl.className = "status " + type;
+    }
+
+    function renderProducts(products) {
+      if (!products.length) {
+        productsEl.innerHTML = `<p class="muted">Wala pang produkto.</p>`;
+        return;
+      }
+      productsEl.innerHTML = products.map((p) => `
+        <article class="product">
+          ${p.image_url
+            ? `<img src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" />`
+            : `<div class="placeholder">No image</div>`}
+          <div class="product-body">
+            <div class="product-name">${esc(p.name)}</div>
+            <div class="price">₱${Number(p.price || 0).toFixed(2)}</div>
+            ${p.description ? `<div class="desc">${esc(p.description)}</div>` : ""}
+            <div class="muted">${new Date(p.created_at).toLocaleString()}</div>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    async function loadProducts() {
+      try {
+        setStatus("Loading products...");
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/${TABLE}?select=*&order=created_at.desc`,
+          { headers }
+        );
+        if (!res.ok) throw new Error(await res.text());
+        const products = await res.json();
+        renderProducts(products);
+        setStatus("");
+      } catch (err) {
+        console.error(err);
+        setStatus("Hindi ma-load ang products. Check Supabase URL/key at table.", "error");
+      }
+    }
+
+    async function addProduct(event) {
+      event.preventDefault();
+      const product = {
+        name: document.getElementById("name").value.trim(),
+        price: Number(document.getElementById("price").value || 0),
+        image_url: document.getElementById("image_url").value.trim() || null,
+        description: document.getElementById("description").value.trim() || null
+      };
+      if (!product.name) return;
+
+      try {
+        setStatus("Adding product...");
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
+          method: "POST",
+          headers: { ...headers, "Prefer": "return=representation" },
+          body: JSON.stringify(product)
+        });
+        if (!res.ok) throw new Error(await res.text());
+        form.reset();
+        setStatus("Na-add na ang produkto!", "success");
+        await loadProducts();
+      } catch (err) {
+        console.error(err);
+        setStatus("Hindi na-add ang produkto. Check RLS/insert policy.", "error");
+      }
+    }
+
+    document.getElementById("unlockBtn").addEventListener("click", () => {
+      const pin = document.getElementById("pinInput").value;
+      if (pin === ADMIN_PIN) {
+        addSection.classList.remove("hidden");
+        setStatus("Admin unlocked.", "success");
+      } else {
+        addSection.classList.add("hidden");
+        setStatus("Mali ang PIN.", "error");
+      }
+    });
+
+    form.addEventListener("submit", addProduct);
+    loadProducts();
+  </script>
+</body>
+</html>
